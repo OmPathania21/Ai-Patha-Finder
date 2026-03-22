@@ -1,9 +1,10 @@
 from flask import Flask, render_template, request, jsonify
 from collections import deque
 import heapq, time, sys
+sys.setrecursionlimit(1000)
 
 app = Flask(__name__)
-sys.setrecursionlimit(5000)
+
 
 DIRS = [(-1, 0), (1, 0), (0, -1), (0, 1)]
 
@@ -221,4 +222,4 @@ def solve():
 
 
 if __name__ == '__main__':
-    app.run(debug=True, port=5000)
+    app.run(debug=False, port=5000)
