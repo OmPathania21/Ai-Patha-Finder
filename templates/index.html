@@ -1158,6 +1158,80 @@
 
     .cell.wall-burst  { animation: wallBurst  0.30s ease-out forwards; }
     .cell.carve-flash { animation: carveFlash 0.34s ease-out forwards; }
+
+    /* ── Coverage bar chart ──────────────────────────────── */
+    .chart-list {
+      display: flex;
+      flex-direction: column;
+      gap: 11px;
+    }
+
+    .chart-item {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .chart-label-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+    }
+
+    .chart-lbl {
+      font-size: 7.5px;
+      font-weight: 800;
+      letter-spacing: 1.8px;
+      text-transform: uppercase;
+      color: var(--text-3);
+    }
+
+    .chart-val {
+      font-family: var(--font-display);
+      font-size: 12px;
+      font-weight: 800;
+      color: var(--text);
+      line-height: 1;
+    }
+
+    .chart-track {
+      height: 7px;
+      background: var(--paper3);
+      border: 1px solid var(--rule);
+      overflow: hidden;
+      position: relative;
+    }
+
+    .chart-bar {
+      height: 100%;
+      width: 0%;
+      transition: width 0.75s cubic-bezier(0.22, 1, 0.36, 1);
+      position: relative;
+    }
+
+    /* Shimmer sweep on bars */
+    .chart-bar::after {
+      content: '';
+      position: absolute;
+      top: 0; right: -20px;
+      width: 20px; height: 100%;
+      background: linear-gradient(to right, transparent, rgba(255,255,255,0.35), transparent);
+      animation: barShimmer 1.4s ease-in-out 0.75s 1;
+    }
+
+    @keyframes barShimmer {
+      0%   { right: 100%; opacity: 0; }
+      20%  { opacity: 1; }
+      100% { right: -20px; opacity: 0; }
+    }
+
+    .explored-bar { background: var(--hi); }
+    .path-bar     {
+      background: linear-gradient(to right,
+        hsl(135, 65%, 42%),
+        hsl(67, 65%, 42%),
+        hsl(0, 65%, 42%));
+    }
   </style>
 </head>
 
@@ -1353,6 +1427,33 @@
           <button class="preset-btn" onclick="generateMaze('random')">Random walls</button>
           <button class="preset-btn" onclick="generateMaze('recursive')">Recursive division</button>
           <button class="preset-btn" onclick="generateMaze('spiral')">Spiral corridor</button>
+        </div>
+      </div>
+
+      <div class="rp-block" id="chart-block" style="display:none">
+        <div class="rp-head">Coverage</div>
+        <div class="chart-list">
+
+          <div class="chart-item">
+            <div class="chart-label-row">
+              <span class="chart-lbl">Explored</span>
+              <span class="chart-val" id="chart-explored-pct">—</span>
+            </div>
+            <div class="chart-track">
+              <div class="chart-bar explored-bar" id="chart-explored-bar"></div>
+            </div>
+          </div>
+
+          <div class="chart-item">
+            <div class="chart-label-row">
+              <span class="chart-lbl">Path eff.</span>
+              <span class="chart-val" id="chart-path-pct">—</span>
+            </div>
+            <div class="chart-track">
+              <div class="chart-bar path-bar" id="chart-path-bar"></div>
+            </div>
+          </div>
+
         </div>
       </div>
 
@@ -1597,6 +1698,22 @@
         }
       }
       setStatus(`Done — ${stats.nodesExplored} explored · ${stats.pathLength} steps · ${stats.timeMs}ms`, 'ok');
+
+      // ── Coverage bar chart ─────────────────────────────────────────────
+      const totalWalkable = ROWS * COLS - countWalls();
+      const exploredPct    = totalWalkable > 0
+            ? Math.min(100, Math.round(stats.nodesExplored / totalWalkable * 100)) : 0;
+      const pathEffPct     = stats.found && stats.nodesExplored > 0
+            ? Math.min(100, Math.round((stats.pathLength + 1) / stats.nodesExplored * 100)) : 0;
+
+      document.getElementById('chart-block').style.display = 'block';
+      document.getElementById('chart-explored-pct').textContent = `${exploredPct}%`;
+      document.getElementById('chart-path-pct').textContent     = stats.found ? `${pathEffPct}%` : '—';
+
+      // Tiny delay so the CSS transition fires after display:block reflows
+      await sl(30);
+      document.getElementById('chart-explored-bar').style.width = `${exploredPct}%`;
+      document.getElementById('chart-path-bar').style.width     = stats.found ? `${pathEffPct}%` : '0%';
     }
 
     const sl = ms => new Promise(r => setTimeout(r, ms));
@@ -1629,6 +1746,18 @@
       const fe = document.getElementById('s-found'); if (fe) { fe.textContent = '—'; fe.className = 'stat-num'; }
       const mf = document.getElementById('ms-found'); if (mf) { mf.textContent = '—'; mf.className = 'm-stat-v'; }
       setStatus('Draw walls · set start & end · hit Visualize.', '');
+      // Reset chart
+      document.getElementById('chart-block').style.display = 'none';
+      document.getElementById('chart-explored-bar').style.width = '0%';
+      document.getElementById('chart-path-bar').style.width     = '0%';
+    }
+
+    function countWalls() {
+      let n = 0;
+      for (let r = 0; r < ROWS; r++)
+        for (let c = 0; c < COLS; c++)
+          if (grid[r][c] === 1) n++;
+      return n;
     }
 
     function resetAll() {
