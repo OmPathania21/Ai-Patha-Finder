@@ -778,13 +778,13 @@
 
     @keyframes pCell {
       0% {
-        background: var(--path);
+        background: var(--cell-path-color, var(--path));
         transform: scale(1.3);
-        box-shadow: 0 0 8px rgba(217, 119, 6, 0.6);
+        box-shadow: 0 0 10px color-mix(in srgb, var(--cell-path-color, var(--path)) 70%, transparent);
       }
 
       100% {
-        background: var(--path);
+        background: var(--cell-path-color, var(--path));
         transform: scale(1);
         box-shadow: none;
       }
@@ -1576,14 +1576,41 @@
       setStatus(`Tracing ${stats.pathLength} steps…`, '');
 
       if (d === 0) {
-        path.forEach(([r, c]) => { if (!spec(r, c)) { cells[r][c].classList.remove('visited'); cells[r][c].classList.add('path'); } });
+        path.forEach(([r, c], i) => {
+          if (!spec(r, c)) {
+            const el = cells[r][c];
+            el.classList.remove('visited');
+            el.style.setProperty('--cell-path-color', pathColor(i, path.length));
+            el.classList.add('path');
+          }
+        });
       } else {
-        for (const [r, c] of path) { await sl(28); if (!spec(r, c)) { cells[r][c].classList.remove('visited'); cells[r][c].classList.add('path'); } }
+        for (let i = 0; i < path.length; i++) {
+          const [r, c] = path[i];
+          await sl(28);
+          if (!spec(r, c)) {
+            const el = cells[r][c];
+            el.classList.remove('visited');
+            el.style.setProperty('--cell-path-color', pathColor(i, path.length));
+            el.classList.add('path');
+          }
+        }
       }
       setStatus(`Done — ${stats.nodesExplored} explored · ${stats.pathLength} steps · ${stats.timeMs}ms`, 'ok');
     }
 
     const sl = ms => new Promise(r => setTimeout(r, ms));
+
+    // Interpolate hue: 135° (green) → 45° (amber) → 0° (red) across the path
+    function pathColor(idx, total) {
+      const t   = total > 1 ? idx / (total - 1) : 0;
+      const hue = Math.round(135 - 135 * t);          // 135 → 0
+      const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+      const sat = isDark ? 72 : 65;
+      const lit = isDark ? 55 : 42;
+      return `hsl(${hue}, ${sat}%, ${lit}%)`;
+    }
+
     function sv(id, v) { const el = document.getElementById(id); if (el) el.textContent = v; }
     function setStatus(msg, cls) {
       const el = document.getElementById('status');
@@ -1593,7 +1620,11 @@
 
     function clearViz() {
       if (animating) return;
-      for (let r = 0; r < ROWS; r++)for (let c = 0; c < COLS; c++)cells[r][c].classList.remove('visited', 'path');
+      for (let r = 0; r < ROWS; r++)
+        for (let c = 0; c < COLS; c++) {
+          cells[r][c].classList.remove('visited', 'path');
+          cells[r][c].style.removeProperty('--cell-path-color');
+        }
       ['s-nodes', 's-path', 's-time', 'ms-nodes', 'ms-path', 'ms-time'].forEach(id => sv(id, '—'));
       const fe = document.getElementById('s-found'); if (fe) { fe.textContent = '—'; fe.className = 'stat-num'; }
       const mf = document.getElementById('ms-found'); if (mf) { mf.textContent = '—'; mf.className = 'm-stat-v'; }
