@@ -1132,6 +1132,32 @@
         --cell-size: 12px;
       }
     }
+
+    /* ── Maze generation animations ──────────────────────────────── */
+    .grid-outer.generating {
+      box-shadow: var(--s-lg), 0 0 0 2px var(--path);
+    }
+
+    .grid-outer.generating::after {
+      opacity: 0.2;
+      animation: scanPulse 1.1s ease-in-out infinite;
+      background: linear-gradient(to bottom, transparent 0%, var(--path) 50%, transparent 100%);
+    }
+
+    @keyframes wallBurst {
+      0%   { background: var(--hi);        transform: scale(0.15); }
+      55%  { background: color-mix(in srgb, var(--cell-wall) 55%, var(--hi)); transform: scale(1.18); }
+      100% { background: var(--cell-wall); transform: scale(1); }
+    }
+
+    @keyframes carveFlash {
+      0%   { background: var(--path); transform: scale(1.3); }
+      60%  { background: color-mix(in srgb, var(--cell-bg) 60%, var(--path)); }
+      100% { background: var(--cell-bg);  transform: scale(1); }
+    }
+
+    .cell.wall-burst  { animation: wallBurst  0.30s ease-out forwards; }
+    .cell.carve-flash { animation: carveFlash 0.34s ease-out forwards; }
   </style>
 </head>
 
@@ -1580,35 +1606,113 @@
       clearViz(); paint();
     }
 
-    function generateMaze(type) {
+    async function generateMaze(type) {
       if (animating) return;
+      animating = true;
       clearViz();
-      grid = Array.from({ length: ROWS }, () => Array(COLS).fill(0));
+
+      const solveBtn = document.getElementById('solve-btn');
+      const outer   = document.getElementById('grid-outer');
+      solveBtn.disabled = true;
+      outer.classList.add('generating');
+      setStatus('Generating maze…', '');
+
+      // Helper: apply a pre-computed step list onto the grid with animation
+      async function applySteps(steps, initGrid, delayMs) {
+        grid = initGrid;
+        paint();
+        await sl(60); // brief pause so the user sees the blank canvas
+        for (const { r, c, val, cls } of steps) {
+          grid[r][c] = val;
+          if (!spec(r, c)) {
+            const el = cells[r][c];
+            el.className = 'cell' + (val === 1 ? ' wall' : '');
+            if (cls) el.classList.add(cls);
+          }
+          if (delayMs > 0) await sl(delayMs);
+        }
+        await sl(350); // let the last batch of animations finish
+        paint();        // final clean repaint (removes leftover animation classes)
+      }
+
+      /* ── Random ─────────────────────────────────────────────────────── */
       if (type === 'random') {
-        for (let r = 0; r < ROWS; r++)for (let c = 0; c < COLS; c++)if (Math.random() < 0.3 && !spec(r, c)) grid[r][c] = 1;
+        const initGrid = Array.from({ length: ROWS }, () => Array(COLS).fill(0));
+        const steps = [];
+        for (let r = 0; r < ROWS; r++)
+          for (let c = 0; c < COLS; c++)
+            if (Math.random() < 0.30 && !spec(r, c))
+              steps.push({ r, c, val: 1, cls: 'wall-burst' });
+        // Scatter randomly so walls don't just fill top-to-bottom
+        steps.sort(() => Math.random() - 0.5);
+        await applySteps(steps, initGrid, 9);
+
+      /* ── Recursive division (iterative DFS to avoid stack overflow) ─── */
       } else if (type === 'recursive') {
-        for (let r = 0; r < ROWS; r++)for (let c = 0; c < COLS; c++)grid[r][c] = 1;
-        function carve(r, c) {
-          grid[r][c] = 0;
-          const dirs = [[-2, 0], [2, 0], [0, -2], [0, 2]].sort(() => Math.random() - .5);
+        const initGrid = Array.from({ length: ROWS }, () => Array(COLS).fill(1)); // all walls
+        const steps    = [];
+        const visited  = Array.from({ length: ROWS }, () => Array(COLS).fill(false));
+
+        const stack = [[1, 1]];
+        visited[1][1] = true;
+        steps.push({ r: 1, c: 1, val: 0, cls: 'carve-flash' });
+
+        while (stack.length) {
+          const [r, c] = stack[stack.length - 1];
+          // Shuffle directions every pop so the maze is properly random
+          const dirs = [[-2, 0], [2, 0], [0, -2], [0, 2]].sort(() => Math.random() - 0.5);
+          let moved = false;
           for (const [dr, dc] of dirs) {
             const nr = r + dr, nc = c + dc;
-            if (nr > 0 && nr < ROWS - 1 && nc > 0 && nc < COLS - 1 && grid[nr][nc] === 1) { grid[r + dr / 2][c + dc / 2] = 0; carve(nr, nc); }
+            if (nr > 0 && nr < ROWS - 1 && nc > 0 && nc < COLS - 1 && !visited[nr][nc]) {
+              visited[nr][nc] = true;
+              // carve the wall between current and next cell
+              steps.push({ r: r + dr / 2, c: c + dc / 2, val: 0, cls: 'carve-flash' });
+              steps.push({ r: nr,         c: nc,          val: 0, cls: 'carve-flash' });
+              stack.push([nr, nc]);
+              moved = true;
+              break;
+            }
           }
+          if (!moved) stack.pop();
         }
-        carve(1, 1);
+
+        // Guarantee start/end cells and their immediate neighbours are passable
         [startNode, endNode].forEach(([sr, sc]) => {
-          grid[sr][sc] = 0;
-          [[-1, 0], [1, 0], [0, -1], [0, 1]].forEach(([dr, dc]) => { const nr = sr + dr, nc = sc + dc; if (nr >= 0 && nr < ROWS && nc >= 0 && nc < COLS) grid[nr][nc] = 0; });
+          steps.push({ r: sr, c: sc, val: 0, cls: 'carve-flash' });
+          [[-1, 0], [1, 0], [0, -1], [0, 1]].forEach(([dr, dc]) => {
+            const nr = sr + dr, nc = sc + dc;
+            if (nr >= 0 && nr < ROWS && nc >= 0 && nc < COLS)
+              steps.push({ r: nr, c: nc, val: 0, cls: 'carve-flash' });
+          });
         });
+
+        await applySteps(steps, initGrid, 13);
+
+      /* ── Spiral corridor ─────────────────────────────────────────────── */
       } else if (type === 'spiral') {
+        const initGrid = Array.from({ length: ROWS }, () => Array(COLS).fill(0));
+        const steps    = [];
         for (let r = 2; r < ROWS - 1; r += 4) {
-          for (let c = 0; c < COLS; c++)if (!spec(r, c)) grid[r][c] = 1;
-          grid[r][(Math.floor(r / 4) % 2 === 0) ? COLS - 2 : 1] = 0;
+          const gapC = (Math.floor(r / 4) % 2 === 0) ? COLS - 2 : 1;
+          // The full wall row (skip gap cell and special nodes)
+          for (let c = 0; c < COLS; c++)
+            if (!spec(r, c) && c !== gapC)
+              steps.push({ r, c, val: 1, cls: 'wall-burst' });
+          // Animate the gap opening with a carve flash
+          if (!spec(r, gapC))
+            steps.push({ r, c: gapC, val: 0, cls: 'carve-flash' });
         }
-        grid[startNode[0]][startNode[1]] = 0; grid[endNode[0]][endNode[1]] = 0;
+        // Make sure start/end are never walled
+        steps.push({ r: startNode[0], c: startNode[1], val: 0 });
+        steps.push({ r: endNode[0],   c: endNode[1],   val: 0 });
+        await applySteps(steps, initGrid, 8);
       }
-      paint();
+
+      animating = false;
+      solveBtn.disabled = false;
+      outer.classList.remove('generating');
+      setStatus('Maze ready — hit Visualize.', 'ok');
     }
 
     let resizeT;
